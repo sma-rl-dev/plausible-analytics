@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "app": "plausible-analytics",
+  "requirements": {
+    "northstar-dashboard": {
+      "status": "present",
+      "evidence": "northstar-market.test has 12 fixed sessions, 12 pageviews, and 3 Newsletter Signup events dated 2026-08-12 through 2026-08-13 UTC."
+    },
+    "northstar-goals": {
+      "status": "present",
+      "evidence": "northstar-market.test has Completed checkout and Newsletter signup goals."
+    },
+    "northstar-sources": {
+      "status": "present",
+      "evidence": "Fixed session sources are Google (5), Direct (4), and GitHub (3)."
+    }
+  }
+}

@@ -27,7 +27,9 @@ RUN apk add --no-cache git "nodejs-current=23.11.1-r0" yarn npm python3 ca-certi
 COPY mix.exs ./
 COPY mix.lock ./
 COPY config ./config
-RUN mix local.hex --force && \
+RUN --mount=type=cache,target=/root/.hex \
+  --mount=type=cache,target=/root/.cache/rebar3 \
+  mix local.hex --force && \
   mix local.rebar --force && \
   mix deps.get --only ${MIX_ENV} && \
   mix deps.compile
@@ -35,7 +37,8 @@ RUN mix local.hex --force && \
 COPY assets/package.json assets/package-lock.json ./assets/
 COPY tracker/package.json tracker/package-lock.json ./tracker/
 
-RUN npm install --prefix ./assets && \
+RUN --mount=type=cache,target=/root/.npm \
+  npm install --prefix ./assets && \
   npm install --prefix ./tracker
 
 COPY assets ./assets
@@ -85,4 +88,3 @@ EXPOSE 8000
 ENV DEFAULT_DATA_DIR=/var/lib/plausible
 VOLUME /var/lib/plausible
 CMD ["run"]
-

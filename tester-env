@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+suffix="${RUN_ID:+-${RUN_ID}}"
+PROJECT="${TESTER_ENV_PROJECT:-tester-env-plausible-analytics}${suffix}"
+IMAGE_NAME="${IMAGE_TAG:-tester-env-plausible-analytics:dev}"
+PORT="${PORT:-8032}"
+BASE_URL="${BASE_URL:-http://localhost:${PORT}}"
+SECRET_KEY_BASE="${SECRET_KEY_BASE:-plausible-tester-env-secret-key-base-000000000000000000000000000000}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@plausible.test}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-PlausibleTesterEnv123!}"
+
+compose() {
+  docker compose -f "$SCRIPT_DIR/docker-compose.tester-env.yml" -p "$PROJECT" "$@"
+}
+
+cmd_deploy() {
+  printf '==> Starting dependencies\n'
+  IMAGE_NAME="$IMAGE_NAME" PORT="$PORT" BASE_URL="$BASE_URL" SECRET_KEY_BASE="$SECRET_KEY_BASE" compose up -d postgres clickhouse
+  printf '==> Building editable source\n'
+  IMAGE_NAME="$IMAGE_NAME" compose build plausible
+  printf '==> Creating and migrating databases\n'
+  IMAGE_NAME="$IMAGE_NAME" BASE_URL="$BASE_URL" SECRET_KEY_BASE="$SECRET_KEY_BASE" compose run --rm plausible db createdb
+  IMAGE_NAME="$IMAGE_NAME" BASE_URL="$BASE_URL" SECRET_KEY_BASE="$SECRET_KEY_BASE" compose run --rm plausible db migrate
+  printf '==> Creating deterministic login\n'
+  IMAGE_NAME="$IMAGE_NAME" BASE_URL="$BASE_URL" SECRET_KEY_BASE="$SECRET_KEY_BASE" ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_PASSWORD="$ADMIN_PASSWORD" compose run --rm plausible /app/bin/plausible eval 'Application.ensure_all_started(:postgrex); Application.ensure_all_started(:ecto); {:ok, _}=Plausible.Repo.start_link(); attrs=%{email: System.fetch_env!("ADMIN_EMAIL"), name: "Tester Env Admin", password: System.fetch_env!("ADMIN_PASSWORD"), password_confirmation: System.fetch_env!("ADMIN_PASSWORD")}; user=Plausible.Repo.get_by(Plausible.Auth.User, email: attrs.email) || Plausible.Repo.insert!(Plausible.Auth.User.new(attrs)); Plausible.Teams.get_or_create(user)'
+  printf '==> Starting Plausible at %s\n' "$BASE_URL"
+  IMAGE_NAME="$IMAGE_NAME" PORT="$PORT" BASE_URL="$BASE_URL" SECRET_KEY_BASE="$SECRET_KEY_BASE" compose up -d plausible
+  for _ in {1..60}; do curl -fsS "$BASE_URL/" >/dev/null && return; sleep 2; done
+  compose logs plausible
+  return 1
+}
+
+cmd_reset() { printf '==> Removing this run containers and volumes\n'; compose down -v; }
+cmd_stop() { printf '==> Stopping this run\n'; compose stop; }
+cmd_logs() { compose logs -f; }
+cmd_status() { compose ps; }
+cmd_seed() { printf '==> Seeding fixed Northstar Market analytics data\n'; IMAGE_NAME="$IMAGE_NAME" BASE_URL="$BASE_URL" SECRET_KEY_BASE="$SECRET_KEY_BASE" ADMIN_EMAIL="$ADMIN_EMAIL" compose run --rm plausible /app/bin/plausible eval 'Application.ensure_all_started(:postgrex); Application.ensure_all_started(:ch); Application.ensure_all_started(:ecto); {:ok, _}=Plausible.Repo.start_link(); {:ok, _}=Plausible.IngestRepo.start_link(); Plausible.TesterEnvSeed.seed()'; }
+cmd_verify() { printf '==> Verifying fixed analytics data\n'; IMAGE_NAME="$IMAGE_NAME" BASE_URL="$BASE_URL" SECRET_KEY_BASE="$SECRET_KEY_BASE" ADMIN_EMAIL="$ADMIN_EMAIL" compose run --rm plausible /app/bin/plausible eval 'Application.ensure_all_started(:postgrex); Application.ensure_all_started(:ch); Application.ensure_all_started(:ecto); {:ok, _}=Plausible.Repo.start_link(); {:ok, _}=Plausible.IngestRepo.start_link(); Plausible.TesterEnvSeed.verify()'; }
+
+case "${1:-help}" in
+  deploy) cmd_deploy ;;
+  seed) cmd_seed ;;
+  verify) cmd_verify ;;
+  reset) cmd_reset ;;
+  stop) cmd_stop ;;
+  logs) cmd_logs ;;
+  status) cmd_status ;;
+  help|-h|--help) printf 'Usage: %s {deploy|seed|verify|reset|stop|status|logs}\nDefaults: PORT=8032, ADMIN_EMAIL=admin@plausible.test, ADMIN_PASSWORD=PlausibleTesterEnv123!\nOptional: IMAGE_TAG, RUN_ID, TESTER_ENV_PROJECT, BASE_URL, SECRET_KEY_BASE\n' "$0" ;;
+  *) printf 'Unknown command: %s\n' "$1" >&2; exit 2 ;;
+esac
