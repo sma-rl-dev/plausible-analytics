@@ -13,6 +13,14 @@
     "northstar-sources": {
       "status": "present",
       "evidence": "Fixed session sources are Google (5), Direct (4), and GitHub (3)."
+    },
+    "northstar-editor": {
+      "status": "present",
+      "evidence": "editor@plausible.test (password PlausibleTesterEnv123!) is a team :editor member on the northstar-market.test team. Team-member :editor covers both change-domain access (site editors allowed) and subscription-visibility (only :owner/:billing see Subscription), so no separate viewer user is needed."
+    },
+    "northstar-shared-link": {
+      "status": "present",
+      "evidence": "One shared link 'Tester Env Shared Link' with fixed slug testerenvsharedlink01 and no password on northstar-market.test."
     }
   }
 }

@@ -2,16 +2,27 @@ defmodule Plausible.TesterEnvSeed do
   import Ecto.Query
 
   alias Plausible.{Auth.User, Goal, Repo, Site, Teams}
+  alias Plausible.Site.SharedLink
+  alias Plausible.Teams.Membership
   alias Plausible.{ClickhouseEventV2, ClickhouseSessionV2, IngestRepo}
 
   @domain "northstar-market.test"
   @start ~N[2026-08-01 00:00:00]
+  @editor_email "editor@plausible.test"
+  @editor_password "PlausibleTesterEnv123!"
+  @shared_link_name "Tester Env Shared Link"
+  @shared_link_slug "testerenvsharedlink01"
 
   def seed do
-    case Repo.get_by(Site, domain: @domain) do
-      nil -> create_seed()
-      _site -> verify()
-    end
+    site =
+      case Repo.get_by(Site, domain: @domain) do
+        nil -> create_seed()
+        site -> site
+      end
+
+    ensure_editor(site)
+    ensure_shared_link(site)
+    verify()
   end
 
   def verify do
@@ -30,7 +41,13 @@ defmodule Plausible.TesterEnvSeed do
         )
       )
 
+    editor = Repo.get_by!(User, email: @editor_email)
+    %Membership{role: :editor} = Repo.get_by!(Membership, team_id: site.team_id, user_id: editor.id)
+    %SharedLink{} = Repo.get_by!(SharedLink, site_id: site.id, slug: @shared_link_slug)
+
     IO.puts("verified #{@domain}: 12 sessions, 12 pageviews, 3 signups, 2 goals")
+    IO.puts("verified #{@domain}: editor #{@editor_email} is team :editor, 1 shared link #{@shared_link_slug}")
+    :ok
   end
 
   defp create_seed do
@@ -84,7 +101,54 @@ defmodule Plausible.TesterEnvSeed do
 
     {12, _} = IngestRepo.insert_all(ClickhouseSessionV2, sessions)
     {15, _} = IngestRepo.insert_all(ClickhouseEventV2, pageviews ++ signups)
-    verify()
+    site
+  end
+
+  # A team-member :editor covers both the change-domain scenario (site editors
+  # may open the change-domain page) and the subscription-visibility scenario
+  # (only :owner/:billing team roles see the Subscription menu entry), so no
+  # separate viewer user is needed.
+  defp ensure_editor(site) do
+    editor =
+      case Repo.get_by(User, email: @editor_email) do
+        nil ->
+          Repo.insert!(
+            User.new(%{
+              email: @editor_email,
+              name: "Tester Env Editor",
+              password: @editor_password,
+              password_confirmation: @editor_password
+            })
+          )
+
+        user ->
+          user
+      end
+
+    team = Repo.get!(Teams.Team, site.team_id)
+
+    case Repo.get_by(Membership, team_id: team.id, user_id: editor.id) do
+      nil ->
+        Repo.insert!(Membership.changeset(team, editor, :editor))
+
+      %Membership{role: :editor} = membership ->
+        membership
+
+      membership ->
+        membership |> Ecto.Changeset.change(role: :editor) |> Repo.update!()
+    end
+  end
+
+  defp ensure_shared_link(site) do
+    case Repo.get_by(SharedLink, site_id: site.id, slug: @shared_link_slug) do
+      nil ->
+        %SharedLink{site_id: site.id, slug: @shared_link_slug}
+        |> SharedLink.changeset(%{name: @shared_link_name})
+        |> Repo.insert!()
+
+      link ->
+        link
+    end
   end
 
   defp session(site_id, index, path, source, utm_source) do
